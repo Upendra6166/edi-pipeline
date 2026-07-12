@@ -1,0 +1,60 @@
+"""
+tokenizer.py — dynamic delimiter detection and segment/element splitting
+for ANSI X12 files.
+"""
+
+
+class Delimiters:
+    def __init__(self, elem_delim, sub_elem_delim, seg_terminator):
+        self.elem_delim = elem_delim
+        self.sub_elem_delim = sub_elem_delim
+        self.seg_terminator = seg_terminator
+
+    def __repr__(self):
+        return (f"Delimiters(element='{self.elem_delim}', "
+                f"sub_element='{self.sub_elem_delim}', "
+                f"segment='{self.seg_terminator}')")
+
+
+def detect_delimiters(raw_text: str) -> Delimiters:
+    if len(raw_text) < 107:
+        raise ValueError("File too short to contain a valid ISA segment")
+
+    if raw_text[0:3] != "ISA":
+        raise ValueError("File does not start with ISA segment")
+
+    elem_delim = raw_text[3]
+    sub_elem_delim = raw_text[104]
+    seg_terminator = raw_text[105]
+
+    return Delimiters(elem_delim, sub_elem_delim, seg_terminator)
+
+
+def split_segments(raw_text: str, delims: Delimiters) -> list[str]:
+    raw_segments = raw_text.split(delims.seg_terminator)
+    return [seg.strip() for seg in raw_segments if seg.strip()]
+
+
+def split_elements(segment: str, delims: Delimiters) -> list[str]:
+    return segment.split(delims.elem_delim)
+
+
+def tokenize(raw_text: str) -> tuple[Delimiters, list[list[str]]]:
+    delims = detect_delimiters(raw_text)
+    raw_segments = split_segments(raw_text, delims)
+    segments = [split_elements(seg, delims) for seg in raw_segments]
+    return delims, segments
+
+
+if __name__ == "__main__":
+    import sys
+    import json
+
+    path = sys.argv[1] if len(sys.argv) > 1 else "../data/sample_204_clean.edi"
+    with open(path, "r") as f:
+        text = f.read()
+
+    delims, segments = tokenize(text)
+    print(f"Detected delimiters: {delims}")
+    print(f"Total segments: {len(segments)}")
+    print(json.dumps(segments, indent=2))

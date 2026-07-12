@@ -46,6 +46,17 @@ def tokenize(raw_text: str) -> tuple[Delimiters, list[list[str]]]:
     return delims, segments
 
 
+def join_elements(elements: list, delims: Delimiters) -> str:
+    """Reverse of split_elements — used by the generator."""
+    return delims.elem_delim.join(elements)
+
+
+def join_segments(segment_lists: list, delims: Delimiters) -> str:
+    """Reverse of tokenize — joins segments back into a raw X12 string."""
+    joined = [join_elements(seg, delims) for seg in segment_lists]
+    return delims.seg_terminator.join(joined) + delims.seg_terminator
+
+
 if __name__ == "__main__":
     import sys
     import json

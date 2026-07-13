@@ -30,10 +30,12 @@ def extract_interchange_metadata(segments):
             meta["isa_control_number"] = get(seg, 13)
             meta["sender_id"] = get(seg, 6, "").strip()
             meta["receiver_id"] = get(seg, 8, "").strip()
+            meta["isa_usage_indicator"] = get(seg, 15, "P")  # "P"=production, "T"=test
         elif seg[0] == "IEA":
             meta["iea_control_number"] = get(seg, 2)
         elif seg[0] == "GS":
             meta["gs_control_number"] = get(seg, 6)
+            meta["gs_functional_id_code"] = get(seg, 1)  # e.g. "SM" for 204s
         elif seg[0] == "GE":
             meta["ge_control_number"] = get(seg, 2)
     return meta
@@ -42,8 +44,10 @@ def extract_interchange_metadata(segments):
 STOP_REASON_MAP = {"CL": "pickup", "CU": "delivery", "LD": "pickup", "UL": "delivery"}
 
 
-def new_stop(seg):
-    """Builds a fresh stop dict when an S5 segment starts a new loop."""
+def new_stop(seg, position):
+    """Builds a fresh stop dict when an S5 segment starts a new loop.
+    position: 1-based index of this S5 segment within the transaction,
+    used to seed _positions so validators can point at real segments."""
     reason_code = get(seg, 2)
     return {
         "stop_number": get(seg, 1),
@@ -54,7 +58,25 @@ def new_stop(seg):
         "address_line1": None, "city": None, "state": None,
         "zip": None, "country": None,
         "contact_name": None, "contact_phone": None,
+        "_positions": {"S5": position},
     }
+
+
+# Each stop-level segment has its own tiny function that fills in the
+# fields it owns. Adding a new stop-level segment later means adding
+# one entry here — the main loop and position tracking don't change.
+STOP_HANDLERS = {
+    "G62": lambda stop, seg: stop.update(
+        appointment_date=get(seg, 2), appointment_time=get(seg, 4)),
+    "N1": lambda stop, seg: stop.update(
+        facility_name=get(seg, 2), facility_id=get(seg, 4)),
+    "N3": lambda stop, seg: stop.update(
+        address_line1=get(seg, 1)),
+    "N4": lambda stop, seg: stop.update(
+        city=get(seg, 1), state=get(seg, 2), zip=get(seg, 3), country=get(seg, 4)),
+    "G61": lambda stop, seg: stop.update(
+        contact_name=get(seg, 2), contact_phone=get(seg, 4)),
+}
 
 
 def parse_204_transaction(txn_segments):
@@ -66,7 +88,7 @@ def parse_204_transaction(txn_segments):
 
     stops, stop, in_stops = [], None, False
 
-    for seg in txn_segments:
+    for position, seg in enumerate(txn_segments, start=1):
         sid = seg[0]
 
         if sid == "ST":
@@ -100,26 +122,11 @@ def parse_204_transaction(txn_segments):
             in_stops = True
             if stop:
                 stops.append(stop)
-            stop = new_stop(seg)
+            stop = new_stop(seg, position)
 
-        elif sid == "G62" and stop:
-            stop["appointment_date"] = get(seg, 2)
-            stop["appointment_time"] = get(seg, 4)
-
-        elif sid == "N1" and stop:
-            stop["facility_name"] = get(seg, 2)
-            stop["facility_id"] = get(seg, 4)
-
-        elif sid == "N3" and stop:
-            stop["address_line1"] = get(seg, 1)
-
-        elif sid == "N4" and stop:
-            stop["city"], stop["state"] = get(seg, 1), get(seg, 2)
-            stop["zip"], stop["country"] = get(seg, 3), get(seg, 4)
-
-        elif sid == "G61" and stop:
-            stop["contact_name"] = get(seg, 2)
-            stop["contact_phone"] = get(seg, 4)
+        elif sid in STOP_HANDLERS and stop:
+            STOP_HANDLERS[sid](stop, seg)
+            stop["_positions"][sid] = position
 
         elif sid == "L3":
             if stop:
@@ -140,8 +147,15 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.dirname(__file__))
     from tokenizer import tokenize
 
-    path = sys.argv[1] if len(sys.argv) > 1 else "../data/sample_204_clean.edi"
-    text = open(path).read()
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
+    input_filename = sys.argv[1] if len(sys.argv) > 1 else "sample_204_clean.edi"
+    input_path = (
+        input_filename if os.path.isfile(input_filename)
+        else os.path.join(DATA_DIR, input_filename)
+    )
+    text = open(input_path).read()
 
     delims, segments = tokenize(text)
     meta = extract_interchange_metadata(segments)

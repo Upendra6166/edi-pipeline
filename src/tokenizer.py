@@ -59,10 +59,19 @@ def join_segments(segment_lists: list, delims: Delimiters) -> str:
 
 if __name__ == "__main__":
     import sys
+    import os
     import json
 
-    path = sys.argv[1] if len(sys.argv) > 1 else "../data/sample_204_clean.edi"
-    with open(path, "r") as f:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
+    input_filename = sys.argv[1] if len(sys.argv) > 1 else "sample_204_clean.edi"
+    input_path = (
+        input_filename if os.path.isfile(input_filename)
+        else os.path.join(DATA_DIR, input_filename)
+    )
+
+    with open(input_path, "r") as f:
         text = f.read()
 
     delims, segments = tokenize(text)
